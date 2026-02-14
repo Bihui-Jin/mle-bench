@@ -20,17 +20,42 @@ def parse_container_config(raw_config: dict) -> dict:
     Parses raw configuration for container.
     Mostly necessary for handling GPU configuration.
     """
-    new_config = {k: v for k, v in raw_config.items() if k != "gpus"}
+    # new_config = {k: v for k, v in raw_config.items() if k != "gpus"}
 
-    # handle GPU configuration
+    # # handle GPU configuration
+    # if "gpus" in raw_config and raw_config["gpus"] != 0:
+    #     gpu_count = raw_config["gpus"]
+    #     new_config["device_requests"] = [
+    #         docker.types.DeviceRequest(count=gpu_count, capabilities=[["gpu"]])
+    #     ]
+
+    # # cast nano_cpus to int
+    # new_config["nano_cpus"] = int(new_config["nano_cpus"]) if "nano_cpus" in new_config else None
+
+    new_config = {k: v for k, v in raw_config.items() if k not in ["gpus", "device_ids"]}
+
     if "gpus" in raw_config and raw_config["gpus"] != 0:
-        gpu_count = raw_config["gpus"]
-        new_config["device_requests"] = [
-            docker.types.DeviceRequest(count=gpu_count, capabilities=[["gpu"]])
-        ]
+        device_ids_str = raw_config.get("device_ids")
+
+        if device_ids_str:
+            device_ids = json.loads(device_ids_str)
+            new_config["device_requests"] = [
+                docker.types.DeviceRequest(device_ids=device_ids, capabilities=[["gpu"]])
+            ]
+        else:
+            # If no device_ids, fall back to using the 'gpus' count.
+            gpu_count = raw_config["gpus"]
+            new_config["device_requests"] = [
+                docker.types.DeviceRequest(count=gpu_count, capabilities=[["gpu"]])
+            ]
+        
+        # Always set the runtime to nvidia if GPUs are requested
+        new_config["runtime"] = "nvidia"
+
 
     # cast nano_cpus to int
     new_config["nano_cpus"] = int(new_config["nano_cpus"]) if "nano_cpus" in new_config else None
+
 
     return new_config
 
@@ -122,6 +147,8 @@ def create_competition_container(
     env_vars: dict,
     container_image: str = "mlebench-env",
     privileged: bool = False,
+    init_code_path: str = "/home/b27jin/mle-bench/environment/init_code.txt",
+    reference_path: str = "/home/b27jin/mle-bench/environment/reference.txt",
 ) -> Container:
     """
     Creates a container for the given competition, mounting the competition data and agent volumes.
@@ -141,15 +168,90 @@ def create_competition_container(
     unique_id = str(uuid.uuid4().hex)
     timestamp = get_timestamp()
 
-    container = client.containers.create(
+    volumes_config.update({
+        "/home/b27jin/mle-bench/agents/aide/additional_notes.txt": {
+            "bind": "/home/agent/additional_notes.txt", 
+            "mode": "ro"
+        },
+        f"{init_code_path}": {
+            "bind": "/home/agent/init_code.txt",
+            "mode": "ro"
+        },
+        "/home/b27jin/aideAutoML/aide/utils/draft_prompt.txt": {
+            "bind": "/home/templates/draft_prompt.txt",
+            "mode": "ro"
+        },
+        "/home/b27jin/aideAutoML/aide/utils/improve_prompt.txt": {
+            "bind": "/home/templates/improve_prompt.txt",
+            "mode": "ro"
+        },
+        "/home/b27jin/aideAutoML/aide/utils/improve_prompt_w_summary.txt": {
+            "bind": "/home/templates/improve_prompt_w_summary.txt",
+            "mode": "ro"
+        },
+        "/home/b27jin/aideAutoML/aide/utils/draft_code_template.py": {
+            "bind": "/home/templates/draft_code_template.py",
+            "mode": "ro"
+        },
+        "/home/b27jin/aideAutoML/aide/utils/summarize_model_performance_prompt.txt": {
+            "bind": "/home/templates/summarize_model_performance_prompt.txt",
+            "mode": "ro"
+        },
+    })
+    if reference_path is not None and os.path.exists(reference_path):
+        volumes_config.update({
+            f"{reference_path}": {
+                "bind": "/home/agent/reference.txt",
+                "mode": "ro"
+            }
+        })
+        
+    container_kwargs = dict(
         image=container_image,
         name=f"competition-{competition.id}-{timestamp}-{unique_id}",
         detach=True,
-        **parse_container_config(container_config),
+        # **parsed,
         volumes=volumes_config,
         environment=env_vars,
         privileged=privileged,
     )
+
+    # logger.info(f"Volumes config: {volumes_config}")
+    # return
+    # Add parsed config like memory, cpu limits
+    parsed_config = parse_container_config(container_config) or {}
+    # logger.info(f"Container config: {parsed_config}")
+    container_kwargs.update(parsed_config)
+
+    # # If GPUs are requested in the config, add BOTH device_requests and the nvidia runtime.
+    # if container_config.get("use_gpus") or container_config.get("gpus"):
+    #     # Avoid adding if already present from parsed_config
+    #     if "device_requests" not in container_kwargs:
+    #         device_ids = container_config.get("device_ids")
+    #         if device_ids:
+    #             container_kwargs["device_requests"] = [
+    #                 docker.types.DeviceRequest(device_ids=device_ids, capabilities=[["gpu"]])
+    #             ]
+    #         else:
+    #             container_kwargs["device_requests"] = [
+    #                 docker.types.DeviceRequest(count=-1, capabilities=[["gpu"]])
+    #             ]
+        
+    #     # Always set the runtime if GPUs are involved
+    #     container_kwargs["runtime"] = "nvidia"
+
+    # logger.info(f"Final container creation args: {container_kwargs}")
+    container = client.containers.create(**container_kwargs)
+
+    # container = client.containers.create(
+    #     image=container_image,
+    #     name=f"competition-{competition.id}-{timestamp}-{unique_id}",
+    #     detach=True,
+    #     **parse_container_config(container_config),
+    #     volumes=volumes_config,
+    #     environment=env_vars,
+    #     privileged=privileged,
+    # )
 
     logger.info(f"Container created: {container.name}")
     return container

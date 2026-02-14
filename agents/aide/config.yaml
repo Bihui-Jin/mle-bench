@@ -1,6 +1,15 @@
 vars:
   step_count: &step_count 500
   time_limit: &time_limit 86400 # 24 hrs
+  # time_limit: &time_limit 864000 # 10 days
+  # time_limit: &time_limit 259200 # 72 hrs
+  # step_count: &step_count 50
+  # time_limit: &time_limit 14400 # 4 hrs
+  # time_limit: &time_limit 25200 # 7 hrs
+  # time_limit: &time_limit 50400 # 14 hrs
+  # time_limit: &time_limit 54000 # 15 hrs
+  # time_limit: &time_limit 3600 # 1 hr
+  # time_limit: &time_limit 43200 # 12 hrs
 
 defaults: &defaults
   start: aide/start.sh
@@ -15,6 +24,8 @@ kwargs_common: &kwargs_common
   agent.search.debug_prob: 1 # always debug when there's something to debug
   agent.time_limit: *time_limit
   exec.timeout: 32400 # 9 hours limit _per step_, to match max of kaggle.com
+  # exec.timeout: 240 # 4 mins
+  # exec.timeout: 86400 # 24 hours
   copy_data: False # use symbolic links
 
 aide:
@@ -24,6 +35,46 @@ aide:
     agent.code.model: gpt-4o-2024-08-06
     agent.feedback.model: gpt-4o-2024-08-06
     agent.steps: *step_count
+  env_vars:
+    <<: *env_vars
+    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+aide/quick:
+  <<: *defaults
+  kwargs:
+    <<: *kwargs_common
+    agent.roulette_enabled: True
+    agent.roulette_models: gpt-5:1,claude-sonnet-4-5:1
+    agent.code.model: claude-sonnet-4-5 # gpt-5 
+    agent.debug.model: claude-sonnet-4-5 # claude-sonnet-4-5-20250929
+    agent.feedback.model: claude-sonnet-4-5
+    agent.steps: *step_count
+    # agent.steps: 1
+    agent.max_no_improvement: 10      # Stop after 10 steps with no improvement
+    agent.search.num_drafts: 1        # Lower than default 5
+    agent.search.max_debug_depth: 10  # Lower than default 20
+    agent.search.debug_prob: 1        # Reduce debug probability
+    # exec.timeout: 1800              # 30 minutes instead of 9 hours
+    # exec.timeout: 14400             # 4 hours instead of 9 hours
+    # exec.timeout: *time_limit       # same as time_limit
+
+  env_vars:
+    <<: *env_vars
+    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    HUGGINGFACE_KEY: ${{ secrets.HUGGINGFACE_KEY }}
+    
+
+aide/debug:
+  <<: *defaults
+  kwargs:
+    <<: *kwargs_common
+    agent.code.model: gpt-4o-2024-08-06
+    agent.feedback.model: gpt-4o-2024-08-06
+    agent.steps: 500
+    agent.search.max_debug_depth: 500  # Lower than default 20
+    agent.search.debug_prob: 1     # Reduce debug probability
+    exec.timeout: 1800               # 30 minutes instead of 9 hours
   env_vars:
     <<: *env_vars
     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

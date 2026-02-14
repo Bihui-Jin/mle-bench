@@ -19,6 +19,9 @@ from mlebench.data import is_dataset_prepared
 from mlebench.registry import Competition, registry
 from mlebench.utils import create_run_dir, get_logger, get_runs_dir, get_timestamp
 
+import subprocess
+import sys
+
 logger = get_logger(__name__)
 
 
@@ -32,7 +35,8 @@ class Task:
     agent: Agent
     competition: Competition
     container_config: dict[str, Any]
-
+    init_code_path: str  # Path to the generated init code
+    reference_path: str  # Path to the reference file
 
 async def worker(
     idx: int,
@@ -68,6 +72,8 @@ async def worker(
                 retain_container=args.retain,
                 run_dir=task.path_to_run,
                 logger=run_logger,
+                init_code_path=task.init_code_path,
+                reference_path=task.reference_path,
             )
             task_output["success"] = True
 
@@ -89,6 +95,20 @@ async def worker(
 
 
 async def main(args):
+    if args.gpu is not None:
+        default_json = "./environment/config/container_configs/default.json"
+        with open(default_json, mode="r") as f:
+            container_config = json.load(f)
+        container_config["device_ids"] = f'["{args.gpu}"]'
+        container_config["nano_cpus"] = int(4e9)
+        with open(default_json, "w") as f:
+            json.dump(container_config, f, indent=4, sort_keys=False)
+    
+    # Clear the file before writing
+    if args.code_gen is not None:
+        with open('/home/b27jin/mle-bench/environment/init_code.txt', mode='w') as f:
+            pass
+            
     client = docker.from_env()
     global registry
     registry = registry.set_data_dir(Path(args.data_dir))
@@ -122,8 +142,22 @@ async def main(args):
     # Create tasks for each (competition * seed)
     logger.info(f"Launching run group: {run_group}")
     tasks = []
+    logger.info(f"# of seeds: {args.n_seeds}")
     for seed in range(args.n_seeds):
         for competition_id in competition_ids:
+            if args.code_gen is not None:
+                init_code_path = await generate_code_for_competition(competition_id, args.code_gen)
+                logger.info(f"{seed}: Generated code for {competition_id} at '{init_code_path}'")
+            
+            reference_path = None
+            if args.insight is not None:
+                if args.insight == "diff":
+                    reference_path = f"/home/b27jin/mle-bench-internal/code_references/diff_plan/{agent.kwargs['agent.code.model']}_{competition_id}.txt"
+                elif args.insight == "soln":
+                    reference_path = f"/home/b27jin/mle-bench-internal/code_references/soln_plan/{agent.kwargs['agent.code.model']}_{competition_id}.txt"
+                elif args.insight == "combo":
+                    reference_path = f"/home/b27jin/mle-bench-internal/code_references/combo_plan/{agent.kwargs['agent.code.model']}_{competition_id}.txt"
+
             competition = registry.get_competition(competition_id)
             run_dir = create_run_dir(competition.id, agent.id, run_group)
             run_id = run_dir.stem
@@ -136,9 +170,11 @@ async def main(args):
                 path_to_run_group=run_dir.parent,
                 path_to_run=run_dir,
                 container_config=container_config,
+                init_code_path=init_code_path if args.code_gen is not None else "/home/b27jin/mle-bench/environment/init_code.txt",
+                reference_path=reference_path,
             )
             tasks.append(task)
-
+    logger.info(f"Analyzing tasks by the model: {agent.kwargs['agent.code.model']}")
     logger.info(f"Creating {args.n_workers} workers to serve {len(tasks)} tasks...")
 
     # Create queue of tasks, and assign workers to run them
@@ -172,7 +208,44 @@ async def main(args):
         json.dump(metadata, f, indent=4, sort_keys=False, default=str)
     logger.info(f"{args.n_workers} workers ran for {time_taken:.2f} seconds in total")
 
+async def generate_code_for_competition(competition_name: str, code_gen_sources: str) -> str:
+    """
+    Runs the generation script for a given competition and captures its output.
+    """
+    if code_gen_sources == "diff":
+        script = "step_9_generate_code_from_diff_insights.py"
+    elif code_gen_sources == "combo":
+        script = "step_7_generate_code_from_two_insights.py"
+    elif code_gen_sources == "soln":
+        script = "step_8_generate_code_from_soln_insights.py"
 
+    command = [
+        sys.executable,  # Use the same python interpreter that's running this script
+        f"/home/b27jin/mle-bench-internal/top_k_scripts/{script}",
+        competition_name
+    ]
+
+    try:
+        # Run the script as a subprocess
+        # capture_output=True captures stdout and stderr
+        # text=True decodes stdout/stderr as text
+        # check=True will raise an exception if the script returns a non-zero exit code
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=True
+        )
+
+        # The captured standard output is the "returned" value
+        return result.stdout.strip()
+
+    except subprocess.CalledProcessError as e:
+        print(f"Error running script for {competition_name}:")
+        print(f"STDOUT:\n{e.stdout}")
+        print(f"STDERR:\n{e.stderr}")
+        return None
+    
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Run an agent on a set of competitions in a Docker container."
@@ -230,7 +303,30 @@ if __name__ == "__main__":
         required=False,
         default=registry.get_data_dir(),
     )
+    parser.add_argument(
+        "--code-gen",
+        help="Code generation sources",
+        type=str,
+        required=False,
+        default=None,
+    )
+    parser.add_argument(
+        "--insight",
+        help="Insight sources",
+        type=str,
+        required=False,
+        default=None,
+    )
+    parser.add_argument(
+        "--gpu",
+        type=int,
+        required=False,
+        default=0,
+        help="Designated GPU to allocate the competition",
+    )
     args = parser.parse_args()
+    print(args)
+
     logger = get_logger(__name__)
 
     asyncio.run(main(args))

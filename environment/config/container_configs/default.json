@@ -1,6 +1,8 @@
 {
     "mem_limit": null,
-    "shm_size": "4G",
-    "nano_cpus": 4e9,
+    "shm_size": "30G",
+    "nano_cpus": 4000000000,
+    "gpus": -1,
+    "device_ids": "[\"2\"]",
     "runtime": "sysbox-runc"
 }

@@ -53,8 +53,21 @@ sed -i 's|/home/||g' ${AGENT_DIR}/full_instructions.txt
 # we'll take care of moving things to home/submission/ ourselves
 
 # move on to agent-specific instructions, with a linebreak in between
-# substitute env variables into additional_notes.txt and append result to full_instructions.txt
 echo "" >> ${AGENT_DIR}/full_instructions.txt
+if [ -s "${AGENT_DIR}/reference.txt" ]; then
+  cat <<'EOF' >> "${AGENT_DIR}/full_instructions.txt"
+REFERENCE
+------
+Use the **design plan** below as a **high-quality** reference to refine your workflow and improve your generated code, not a drop-in: **reuse ideas, not dataset-specific artifacts**.
+EOF
+
+  echo "" >> ${AGENT_DIR}/full_instructions.txt
+  cat ${AGENT_DIR}/reference.txt >> ${AGENT_DIR}/full_instructions.txt
+  echo "" >> ${AGENT_DIR}/full_instructions.txt
+  echo "" >> ${AGENT_DIR}/full_instructions.txt
+fi
+
+# substitute env variables into additional_notes.txt and append result to full_instructions.txt
 envsubst < ${AGENT_DIR}/additional_notes.txt >> ${AGENT_DIR}/full_instructions.txt
 # finally, append the comp instructions, with a linebreak in between
 printf "\nCOMPETITION INSTRUCTIONS\n------\n\n" >> ${AGENT_DIR}/full_instructions.txt

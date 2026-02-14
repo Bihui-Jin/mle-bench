@@ -43,7 +43,7 @@ def save_output(container: Container, save_dir: Path, container_config: dict) ->
     return save_dir
 
 
-def execute_agent(container: Container, agent: Agent, logger: logging.Logger):
+def execute_agent(container: Container, agent: Agent, logger: logging.Logger, image: str):
     """
     Initiates the agent via its start script inside the container.
     """
@@ -57,7 +57,9 @@ def execute_agent(container: Container, agent: Agent, logger: logging.Logger):
         cmd += [f"{key}={value}" for key, value in agent.kwargs.items()]
 
     logger.info("Running agent...")
+    logger.info("cmd: "+ str(cmd))
     exit_code, output = container.exec_run(cmd, stream=True, user="nonroot")
+    logger.info(exit_code)
 
     for chunk in output:
         logger.info(f"[Container] {chunk.decode('utf-8').strip()}")
@@ -70,12 +72,12 @@ def clean_up(container: Container, logger: logging.Logger, retain: bool = False)
     Returns:
         True if successful, False otherwise.
     """
-    logger.info(f"Cleaning up container: {container.name}")
     try:
-        container.stop()
         if not retain:
+            logger.info(f"Cleaning up container: {container.name}")
+            container.stop()
             container.remove()
-        logger.info(f"Container {container.name} stopped and removed.")
+            logger.info(f"Container {container.name} stopped and removed.")
         return True
     except Exception as e:
         logger.error(
@@ -93,6 +95,8 @@ def run_in_container(
     retain_container: bool,
     run_dir: Path,
     logger: logging.Logger,
+    init_code_path: str = "/home/b27jin/mle-bench/environment/init_code.txt",
+    reference_path: str = "/home/b27jin/mle-bench/environment/reference.txt",
 ) -> Path:
     """
     Runs environment containing the competition and agent for a set maximum amount of time.
@@ -132,6 +136,8 @@ def run_in_container(
         },
         container_image=image,
         privileged=agent.privileged,
+        init_code_path=init_code_path,
+        reference_path=reference_path,
     )
 
     logger.info(purple(f"Run started: {run_dir}"))
@@ -145,7 +151,7 @@ def run_in_container(
             raise RuntimeError(
                 "The grading server failed to start within 60 seconds. This is likely due to an error in `entrypoint.sh`; check the logs."
             )
-        execute_agent(container, agent, logger)
+        execute_agent(container, agent, logger, image)
         save_output(container, run_dir, container_config)
         time_end = time.monotonic()
         logger.info(f"Run completed in {time_end - time_start:.2f} seconds.")

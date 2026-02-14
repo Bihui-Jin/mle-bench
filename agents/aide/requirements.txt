@@ -1,1 +1,3 @@
-git+https://github.com/thesofakillers/aideml@v6.3.3
+# git+https://github.com/thesofakillers/aideml@v6.3.3
+# git+https://github.com/Bihui-Jin/aideml.git
+git+https://github.com/Bihui-Jin/aideAutoML.git

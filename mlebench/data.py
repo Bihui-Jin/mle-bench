@@ -14,6 +14,9 @@ import yaml
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_fixed
 from tqdm.auto import tqdm
 
+import uuid
+import atexit
+
 from mlebench.registry import Competition
 from mlebench.utils import (
     authenticate_kaggle_api,
@@ -26,8 +29,18 @@ from mlebench.utils import (
 )
 
 logger = get_logger(__name__)
-cache = dc.Cache("cache", size_limit=2**26)  # 64 MB
+_cache_dir = f"cache/cache_{os.getpid()}_{uuid.uuid4().hex[:8]}"
+cache = dc.Cache(_cache_dir, size_limit=2**26)  # 64 MB
 
+def _cleanup_cache():
+    try:
+        cache.close()
+        if os.path.exists(_cache_dir):
+            shutil.rmtree(_cache_dir)
+    except Exception:
+        pass
+
+atexit.register(_cleanup_cache)
 
 def create_prepared_dir(competition: Competition) -> None:
     competition.public_dir.mkdir(exist_ok=True, parents=True)
